@@ -22,7 +22,6 @@ from sklearn.metrics import (
     classification_report,
     confusion_matrix,
     f1_score,
-    precision_recall_curve,
     precision_score,
     recall_score,
     roc_auc_score,
@@ -36,7 +35,8 @@ FAILURES = [
     ("2020-07-15 14:30", "2020-07-15 19:00"),
 ]
 DIGITAL_COLUMNS = {
-    "COMP", "DV_electric", "TOWERS", "MPG", "LPS", "Pressure_switch", "Oil_level"
+    "comp", "dv_eletric", "towers", "mpg", "lps", "pressure_switch", "oil_level",
+    "caudal_impulses", "unnamed: 0",
 }
 
 
@@ -78,7 +78,8 @@ def load_data(path: Path) -> pd.DataFrame:
 
 def make_features(data: pd.DataFrame, frequency: str, lead_hours: int) -> pd.DataFrame:
     """Create causal rolling statistics and weak labels from reported failure windows."""
-    analog = [c for c in data.select_dtypes(include=np.number).columns if c not in DIGITAL_COLUMNS]
+    analog = [c for c in data.select_dtypes(include=np.number).columns
+              if c.strip().casefold() not in DIGITAL_COLUMNS]
     if not analog:
         raise ValueError("No analog sensor columns were found in the input data.")
     sensors = data[analog].resample(frequency).mean()
@@ -103,12 +104,16 @@ def make_features(data: pd.DataFrame, frequency: str, lead_hours: int) -> pd.Dat
     return result.replace([np.inf, -np.inf], np.nan).dropna(subset=result.columns.difference(["failure_period"]))
 
 
-def choose_threshold(y_true: pd.Series, probabilities: np.ndarray) -> float:
-    precision, recall, thresholds = precision_recall_curve(y_true, probabilities)
-    if len(thresholds) == 0:
+def choose_threshold(y_true: pd.Series, probabilities: np.ndarray, max_false_positive_rate: float = 0.01) -> float:
+    """Choose the lowest validation threshold that respects the alert-rate budget."""
+    negatives = probabilities[np.asarray(y_true) == 0]
+    if len(negatives) == 0:
         return 0.5
-    scores = 2 * precision[:-1] * recall[:-1] / (precision[:-1] + recall[:-1] + 1e-12)
-    return float(thresholds[int(np.nanargmax(scores))])
+    for threshold in np.unique(probabilities):
+        false_positive_rate = np.mean(negatives >= threshold)
+        if false_positive_rate <= max_false_positive_rate:
+            return float(threshold)
+    return float(np.nextafter(np.max(probabilities), np.inf))
 
 
 def save_plots(data: pd.DataFrame, test: pd.DataFrame,
@@ -211,6 +216,7 @@ def run(data_path: Path, output_dir: Path, frequency: str, lead_hours: int) -> d
         "validation_period": [str(valid.index.min()), str(valid.index.max())],
         "test_period": [str(test.index.min()), str(test.index.max())],
         "validation_selected_threshold": threshold,
+        "validation_max_false_positive_rate": 0.01,
         "test_precision": float(precision_score(y_test, predicted, zero_division=0)),
         "test_recall": float(recall_score(y_test, predicted, zero_division=0)),
         "test_f1": float(f1_score(y_test, predicted, zero_division=0)),
@@ -228,6 +234,11 @@ def run(data_path: Path, output_dir: Path, frequency: str, lead_hours: int) -> d
     predictions["anomaly_flag"] = (anomaly_scores >= anomaly_cutoff).astype("int8")
     metrics["isolation_forest_test_anomaly_rate"] = float(predictions["anomaly_flag"].mean())
     metrics["isolation_forest_cutoff"] = anomaly_cutoff
+    metrics["isolation_forest_precision"] = float(precision_score(y_test, predictions["anomaly_flag"], zero_division=0))
+    metrics["isolation_forest_recall"] = float(recall_score(y_test, predictions["anomaly_flag"], zero_division=0))
+    metrics["isolation_forest_f1"] = float(f1_score(y_test, predictions["anomaly_flag"], zero_division=0))
+    metrics["isolation_forest_average_precision"] = float(average_precision_score(y_test, anomaly_scores))
+    metrics["isolation_forest_roc_auc"] = float(roc_auc_score(y_test, anomaly_scores))
 
     output_dir.mkdir(parents=True, exist_ok=True)
     predictions.to_csv(output_dir / "holdout_predictions.csv", index_label="timestamp")
