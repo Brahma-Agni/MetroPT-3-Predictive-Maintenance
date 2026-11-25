@@ -31,7 +31,7 @@ python -m src.metropt_pipeline --data /path/to/MetroPT3.csv --output reports/gen
 
 - `metrics.json`: chronological split dates, precision, recall, F1, average precision, ROC-AUC, and anomaly rate.
 - `holdout_predictions.csv`: timestamped risk probabilities, predictions, anomaly scores, and weak labels.
-- `sensor_trends.png`, `holdout_predictions.png`, `confusion_matrix.png`, `feature_importance.png`.
+- `sensor_trends.png`, `holdout_predictions.png`, `detected_anomalies.png`, `confusion_matrix.png`, `feature_importance.png`.
 
 ## Important interpretation
 

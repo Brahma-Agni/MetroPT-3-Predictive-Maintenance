@@ -111,7 +111,7 @@ def choose_threshold(y_true: pd.Series, probabilities: np.ndarray) -> float:
     return float(thresholds[int(np.nanargmax(scores))])
 
 
-def save_plots(data: pd.DataFrame, features: pd.DataFrame, test: pd.DataFrame,
+def save_plots(data: pd.DataFrame, test: pd.DataFrame,
                predictions: pd.DataFrame, model: RandomForestClassifier,
                output_dir: Path) -> None:
     sns.set_theme(style="whitegrid")
@@ -162,6 +162,21 @@ def save_plots(data: pd.DataFrame, features: pd.DataFrame, test: pd.DataFrame,
     axis.legend(loc="upper right")
     fig.tight_layout()
     fig.savefig(output_dir / "holdout_predictions.png", dpi=150)
+    plt.close(fig)
+
+    sensor = "TP2" if "TP2" in data else data.select_dtypes(include=np.number).columns[0]
+    trend = data[sensor].resample("5min").mean().reindex(test.index)
+    anomaly_mask = predictions["anomaly_flag"].astype(bool)
+    fig, axis = plt.subplots(figsize=(15, 5))
+    axis.plot(trend.index, trend, color="#2563eb", linewidth=0.8, label=sensor)
+    axis.scatter(trend.index[anomaly_mask], trend[anomaly_mask], color="#dc2626", s=14,
+                 label="Isolation Forest anomaly", zorder=3)
+    for start_text, end_text in FAILURES:
+        axis.axvspan(pd.Timestamp(start_text), pd.Timestamp(end_text), color="#64748b", alpha=0.12)
+    axis.set(title=f"Held-out {sensor} trend with detected anomalies", ylabel=sensor, xlabel="Timestamp")
+    axis.legend(loc="upper right")
+    fig.tight_layout()
+    fig.savefig(output_dir / "detected_anomalies.png", dpi=150)
     plt.close(fig)
 
 
@@ -217,7 +232,7 @@ def run(data_path: Path, output_dir: Path, frequency: str, lead_hours: int) -> d
     output_dir.mkdir(parents=True, exist_ok=True)
     predictions.to_csv(output_dir / "holdout_predictions.csv", index_label="timestamp")
     (output_dir / "metrics.json").write_text(json.dumps(metrics, indent=2))
-    save_plots(raw, table, test, predictions, model, output_dir)
+    save_plots(raw, test, predictions, model, output_dir)
     return metrics
 
 
